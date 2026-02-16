@@ -1,0 +1,11 @@
+{
+  "name": "claude-assisted-review",
+  "description": "AI-guided Pull Request code review with storytelling-based change presentation. Claude reads the PR, groups changes logically, and walks the reviewer through each change with proper context and rationale.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Rodrigo Oliveira"
+  },
+  "repository": "https://github.com/roo-oliv/claude-assisted-review-plugin",
+  "license": "MIT",
+  "keywords": ["code-review", "pull-request", "github", "review", "diff"]
+}

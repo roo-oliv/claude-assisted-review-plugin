@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "review-ui": {
+      "command": "node",
+      "args": ["mcp-server/server.mjs"]
+    }
+  }
+}
