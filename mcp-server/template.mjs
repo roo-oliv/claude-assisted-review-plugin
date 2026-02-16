@@ -171,13 +171,11 @@ body {
   flex-wrap: wrap;
 }
 .packet-file-icon { flex-shrink: 0; color: var(--gutter-fg); }
-.packet-file { font-weight: 600; word-break: break-all; }
+.packet-file { font-weight: 400; word-break: break-all; color: var(--gutter-fg); }
 .packet-part { color: var(--gutter-fg); }
 .packet-title {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-  color: var(--gutter-fg);
-  font-style: italic;
-  font-weight: 400;
+  font-weight: 600;
 }
 
 .badge {
@@ -628,12 +626,12 @@ function renderPackets() {
     const isImport = pkt.is_imports;
     hdr.innerHTML =
       (isImport ? '<span class="collapse-chevron"></span>' : '') +
+      (pkt.title ? '<span class="packet-title">' + escHTML(pkt.title) + '</span> ' : '') +
       '<svg class="packet-file-icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M2 1.75C2 .784 2.784 0 3.75 0h6.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16h-9.5A1.75 1.75 0 0 1 2 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h9.5a.25.25 0 0 0 .25-.25V6h-2.75A1.75 1.75 0 0 1 9 4.25V1.5Zm6.75.062V4.25c0 .138.112.25.25.25h2.688l-.011-.013-2.914-2.914-.013-.011Z"/></svg>' +
       '<span class="packet-file">' + escHTML(pkt.file) + '</span>' +
       (pkt.part !== '1/1' ? ' <span class="packet-part">(' + escHTML(pkt.part) + ')</span>' : '') +
       ' <span class="badge ' + statusBadgeClass(pkt) + '">' + escHTML(statusLabel(pkt)) + '</span>' +
       (isImport ? ' <span class="badge badge-imports">Imports</span>' : '') +
-      (pkt.title ? ' <span class="packet-title">' + escHTML(pkt.title) + '</span>' : '') +
       '<span class="packet-stats">' +
         (pkt.additions > 0 ? '<span class="add">+' + pkt.additions + '</span> ' : '') +
         (pkt.deletions > 0 ? '<span class="del">-' + pkt.deletions + '</span>' : '') +
