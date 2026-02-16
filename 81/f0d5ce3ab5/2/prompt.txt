@@ -1,0 +1,167 @@
+Implement the following plan:
+
+# Plan: AI-Driven Annotation-Based Packets (v4)
+
+## Context
+
+The current `prepare-packets.sh` mechanically splits diffs at ~10 changed lines. This creates bad boundaries — e.g., a single dataclass field orphaned in its own packet. We want Claude to create the packets by walking the diff and leaving brief annotations ("what does this chunk do?"), which *become* the packets. This merges packet creation and narrative ordering into a single step.
+
+## Key Design Decisions
+
+1. **`prepare-packets.sh` becomes a per-file preprocessor** — no splitting, just file classification + metadata + full per-file diffs. Still handles special files (lock, binary, generated, minified).
+2. **Claude creates packets as annotations** in a new combined Phase 2. Each annotation = a line range + 1-2 sentence explanation + semantic title. Ordered narratively.
+3. **MCP server slices diffs by line range** — reads the per-file sidecar, uses Claude's line ranges to extract per-packet hunks. A safety net auto-creates catch-all packets for any changed lines Claude missed.
+4. **Browser UI unchanged** — still receives packets with `hunks` arrays.
+
+## Changes by File
+
+### 1. `scripts/prepare-packets.sh` — Major refactor
+
+**Remove:** `TARGET`, `MAX_HUNK`, `maybe_flush_hunk()`, `flush_packet()`, mid-hunk splitting, `packet_parts` tracking, all per-packet arrays (`pkt_diff`, `pkt_part`, etc.), post-hoc import tagging.
+
+**Keep:** File classification (lock/binary/generated/minified), file metadata (additions/deletions/new/deleted/renamed), `json_escape()`, `is_import_line()` (keep for possible future use but unused in main flow).
+
+**New behavior:** One entry per file. Each normal file keeps its full diff content intact.
+
+**Stdout format changes:**
+```
+===FILE_INDEX_START===
+FILE id=1 file=src/auth.ts add=15 del=3 type=normal status=modified
+FILE id=2 file=package-lock.json add=200 del=180 type=lock status=modified
+FILE id=3 file=src/new.ts add=20 del=0 type=normal status=added
+TOTAL_FILES=3
+===FILE_INDEX_END===
+
+===FILE id=1===
+### `src/auth.ts` (+15 -3)
+
+```diff
+--- a/src/auth.ts
++++ b/src/auth.ts
+@@ ... @@
+...full file diff...
+```
+===END===
+
+===FILE id=2===
+### `package-lock.json` (lock file, +200 -180)
+Dependency lock file updated.
+===END===
+
+REDACTED.json===
+```
+
+**Sidecar JSON changes:**
+```json
+{
+  "files": [
+    {
+      "id": 1,
+      "file": "src/auth.ts",
+      "type": "normal",
+      "status": "modified",
+      "additions": 15,
+      "deletions": 3,
+      "rename_from": null,
+      "content": "### `src/auth.ts` (+15 -3)\n\n```diff\n..."
+    }
+  ]
+}
+```
+
+### 2. `skills/review-pr/review-instructions.md` — Rewrite Phase 2
+
+**Phase 2: Annotate & Order** (replaces "Packet Ordering")
+
+New workflow:
+1. Read `===FILE_INDEX_START===` to identify files. Special files (lock/binary/generated/minified) become auto-packets with standard titles — no annotation needed.
+2. For each normal file, walk the diff and create **annotations**:
+   - Each annotation covers a **meaningful code unit** — a function, a group of related fields, a logical change, a test case, etc.
+   - Each annotation has: `file_id`, `start_line`/`end_line` (new-file line numbers from the `+` column; for pure deletions use old-file numbers and set `side: "LEFT"`), `title` (micro-commit message), `description` (1-2 sentences).
+   - Guidance (not rigid): aim for 5-30 changed lines per annotation. A single line is fine if semantically distinct. A 50-line function is fine if it's cohesive. The question is: "can a reviewer hold this in their head as one concept?"
+   - Import-heavy regions: collapse into a single "Update imports" annotation.
+3. **Verify completeness**: Check that every `+` and `-` line falls within an annotation. If gaps exist, either expand a neighboring annotation or create a new one.
+4. **Order narratively** into lines of thought (same logic as before: types → implementation → integration → tests → config → special files). Assign sequential packet IDs.
+5. Present the plan to the reviewer and proceed to Phase 3.
+
+**Phase 3 metadata changes** — Claude now sends:
+```json
+{
+  "id": 1,
+  "file_id": 1,
+  "start_line": 10,
+  "end_line": 25,
+  "side": "RIGHT",
+  "title": "Add JWT expiry validation",
+  "file_status": "modified",
+  "language": "typescript",
+  "ai_summary": "...",
+  "existing_comments": [...]
+}
+```
+
+No `content`, `file`, `part`, `type`, `additions`, or `deletions` — the MCP server derives these from the sidecar + line range.
+
+### 3. `mcp-server/server.mjs` — Schema update
+
+Add to packet schema: `file_id` (number), `start_line` (number), `end_line` (number), `side` (string, optional, default "RIGHT").
+
+### 4. `mcp-server/review-tool.mjs` — Major update to merge logic
+
+**New function: `sliceHunksByLineRange(hunks, startLine, endLine, side)`**
+
+- Walk all hunks from the file's parsed diff
+- For each hunk, find lines where `newNum` (or `oldNum` if side=LEFT) falls within `[startLine, endLine]`
+- Include context lines adjacent to matching changed lines (up to 3 lines of padding)
+- Handle paired del/add lines: if a `+` line is in range, include its paired `-` line too (and vice versa)
+- Return filtered hunks with synthetic headers
+
+**Rewritten `mergePacketData(dataFile, claudePackets)`:**
+
+1. Read sidecar → `{files: [...]}`
+2. Index files by id
+3. Parse each file's diff into hunks via `parseDiffContent()` (called once per file, cached)
+4. For each of Claude's packets (in order):
+   - Look up the file by `file_id`
+   - If special type → empty hunks, use file-level metadata
+   - If normal → call `sliceHunksByLineRange()` with the annotation's line range
+   - Compute `additions`/`deletions` from the sliced hunks
+   - Compute `part`/`total_parts` (count how many packets share this file_id)
+5. **Safety net**: After processing all packets, scan each normal file's hunks for changed lines (add/del) not covered by any annotation. If found, create a synthetic "Remaining changes in {file}" packet with those lines.
+
+**Output shape unchanged** — still `{id, file, part, total_parts, type, additions, deletions, content, is_imports, hunks, title, ...}`. The browser UI receives exactly the same structure.
+
+### 5. `skills/review-pr/SKILL.md` — Update references
+
+- Update description (remove "~10 changed lines" language)
+- Change `===PACKET_INDEX_START===` references to `===FILE_INDEX_START===`
+- Update "Lightweight packets" note to mention `file_id`, `start_line`, `end_line`
+- Update step 2 from "Reading the packet index" to "Reading the file index"
+
+### 6. `mcp-server/template.mjs` — No changes
+
+The browser receives the same packet shape with `hunks` arrays.
+
+## Implementation Order
+
+1. `scripts/prepare-packets.sh` — Refactor to per-file output
+2. `mcp-server/review-tool.mjs` — `sliceHunksByLineRange()` + rewritten `mergePacketData()` + safety net
+3. `mcp-server/server.mjs` — Add new fields to schema
+4. `skills/review-pr/review-instructions.md` — New Phase 2
+5. `skills/review-pr/SKILL.md` — Update references
+6. End-to-end test against a real PR
+
+## Verification
+
+1. Run `bash scripts/prepare-packets.sh <PR>` on a real PR → confirm per-file output, sidecar has `files` array
+2. Invoke `/review-pr <PR>` → confirm Claude creates annotations, browser shows correctly sliced diffs
+3. Check the safety net: intentionally narrow an annotation range to miss lines → confirm MCP server creates a catch-all packet
+4. Verify special files (lock, binary) still render as single summary packets
+5. Verify inline commenting still works (line numbers must be correct in sliced hunks)
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/rodrigooliveira/.REDACTED.jsonl
+
+---
+
+Add everything (git add .), commit and push to main
