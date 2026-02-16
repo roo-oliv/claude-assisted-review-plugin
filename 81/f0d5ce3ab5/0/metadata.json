@@ -1,0 +1,31 @@
+{
+  "cli_version": "0.4.4",
+  "checkpoint_id": "81f0d5ce3ab5",
+  "session_id": "1142c080-1422-4a7b-9af2-a1a89b7a6fe5",
+  "strategy": "manual-commit",
+  "created_at": "2026-02-16T20:01:19.377098Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".gitignore"
+  ],
+  "agent": "Claude Code",
+  "transcript_identifier_at_start": "d1483e70-bdf3-429d-a1f7-e0821e2b9d8c",
+  "token_usage": {
+    "input_tokens": 23,
+    "cache_creation_tokens": 23361,
+    "cache_read_tokens": 467804,
+    "output_tokens": 1564,
+    "api_call_count": 17
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-02-16T20:01:19.321957Z",
+    "agent_lines": 0,
+    "human_added": 685,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 685,
+    "agent_percentage": 0
+  },
+  "transcript_path": ".claude/projects/-Users-rodrigooliveira-git-roo-oliv-claude-assisted-review-plugin/1142c080-1422-4a7b-9af2-a1a89b7a6fe5.jsonl"
+}
