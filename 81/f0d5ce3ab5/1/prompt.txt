@@ -1,0 +1,118 @@
+Implement the following plan:
+
+# Plan: Settings Cog Menu with "Hide Whitespace" and "Collapse Imports"
+
+## Context
+
+The review UI currently has no settings/preferences menu. Two common code review annoyances — whitespace-only diffs cluttering the view and import sections distracting from logic changes — need dedicated toggles. GitHub offers similar features in its diff viewer. This plan adds a cog menu in the counter bar with two toggles, both enabled by default.
+
+---
+
+## 1. Whitespace-Only Line Detection — `mcp-server/review-tool.mjs`
+
+Add a `markWhitespaceOnlyChanges(hunks)` function, called at the end of `parseDiffContent()` (line 69, before `return hunks`).
+
+**Algorithm:** Walk each hunk's lines. Find "change blocks" (contiguous `del` lines immediately followed by contiguous `add` lines). If `del` count equals `add` count and every pair matches after stripping all whitespace (`.replace(/\s/g, '')`), set `wsOnly: true` on every line in that block.
+
+This runs server-side so the browser just checks a boolean flag — no content re-parsing needed client-side.
+
+## 2. Import Packet Tagging — `scripts/prepare-packets.sh`
+
+Add post-hoc import tagging in the awk `END` block (after line 239, where `pkt_tp` is resolved).
+
+**Approach:**
+- Add an `is_import_line(line)` awk function that checks if a diff content line (after stripping `+`/`-`/` ` prefix and leading whitespace) matches common import patterns:
+  - JS/TS: `import ...`, `export ... from`, `} from`, `require(`
+  - Python: `import ...`, `from ... import`
+  - C/C++: `#include`
+  - Rust: `use ...`
+  - Go: `import`
+  - C#/Java: `using ...`
+- In the END block, for each non-special packet: split `pkt_diff` into lines, count changed lines (`+`/`-` prefix) that match import patterns vs total changed lines. If >= 80% match, set `pkt_is_imports[id] = 1`.
+- Emit `"is_imports":true` in the JSON sidecar (line 336) and append `imports` flag to the packet index line (line 244).
+
+**Why post-hoc tagging instead of mid-stream splitting:** The existing splitting logic is already complex (hunk management, line tracking, mid-hunk splits). Import-aware splitting would add significant complexity. Since packets are ~10 lines, import blocks naturally fall into their own packets most of the time. The 80% threshold handles edge cases where a stray context line is mixed in.
+
+## 3. Pass `is_imports` Through Merge — `mcp-server/review-tool.mjs`
+
+In `mergePacketData()` (line 96-112), add `is_imports: fp.is_imports || false` to the merged packet object. No MCP schema change needed — this field comes from the sidecar file, not from Claude's metadata.
+
+Also call `markWhitespaceOnlyChanges(hunks)` on the parsed hunks before adding them to the merged object (this is where `parseDiffContent` results flow into the final data).
+
+## 4. Settings Cog Menu UI — `mcp-server/template.mjs`
+
+### 4a. CSS (insert after `kbd` styles, before `</style>` at line 414)
+
+- `.settings-container` — relative positioning wrapper in the counter bar
+- `.settings-btn` — gear SVG icon button, borderless, matches counter bar style
+- `.settings-dropdown` — absolute dropdown below cog, `z-index: 200`, `min-width: 260px`, hidden by default
+- `.settings-dropdown.open` — `display: block`
+- `.settings-item` — flex row with label + toggle switch
+- `.settings-toggle` / `.toggle-slider` — CSS-only toggle switch (styled checkbox)
+- `.line-ws-only .code, .line-ws-only .gutter` — `opacity: 0.35` (dimmed when visible)
+- `.ws-hidden .line-ws-only` — `display: none` (hidden when toggle on)
+- `.collapse-chevron` — rotatable triangle indicator on import packet headers
+- `.packet.collapsed .diff-table, .packet.collapsed .ai-summary, .packet.collapsed .diff-summary` — `display: none`
+- `.badge-imports` — purple-ish badge for import packets
+- Dark mode support via existing CSS variable system
+
+### 4b. HTML (counter bar, lines 436-446)
+
+Insert settings container between `.kb-hints` and the "Finish review" link:
+
+```
+[comment count] [.] [N packets] --- [kb hints] [cog] [Finish review]
+```
+
+The cog contains a gear SVG icon. The dropdown has two toggle rows: "Hide whitespace changes" (checked by default) and "Collapse imports" (checked by default).
+
+### 4c. JavaScript
+
+**Settings state** (near `state` object at line 470):
+```js
+const settings = { hideWhitespace: true, collapseImports: true };
+```
+
+**Cog open/close:** Click cog toggles `.open` on dropdown. Click outside or Escape closes it. Escape handler added before the existing `closeOpenForm()` in the keyboard handler (line ~1026).
+
+**Toggle handlers:**
+- `toggleWhitespace` change → add/remove `.ws-hidden` on `#packets` container
+- `toggleImports` change → add/remove `.collapsed` on all `.packet[data-is-imports="true"]`
+
+**Apply on initial render** (after `renderPackets()` call):
+- `#packets` starts with `.ws-hidden`
+- Import packets start with `.collapsed`
+
+## 5. Update Packet Rendering — `mcp-server/template.mjs`
+
+In `renderPackets()` (lines 518-678):
+
+1. **Import packets** (after line 526): If `pkt.is_imports`, set `el.dataset.isImports = 'true'` and add `.collapsed` class if `settings.collapseImports`. Add a collapse chevron to the header and an "Imports" badge. Make the header clickable to toggle `.collapsed`.
+
+2. **Whitespace-only lines** (line 578-601): If `line.wsOnly`, add `.line-ws-only` class to the `<tr>`.
+
+## 6. Update Review Instructions — `skills/review-pr/review-instructions.md`
+
+- **Phase 2 (Packet Ordering):** Add note that packets marked `imports` in the index should be grouped at the end of their parent line of thought or together at the end. They're collapsed in the UI by default.
+- **Phase 3b (Metadata):** Note that import packets can have minimal `ai_summary` (one sentence). The browser collapses them by default.
+
+---
+
+## Files Modified
+
+| File | Changes |
+|------|---------|
+| `mcp-server/review-tool.mjs` | `markWhitespaceOnlyChanges()` function, `is_imports` passthrough in merge |
+| `scripts/prepare-packets.sh` | `is_import_line()` function, post-hoc tagging in END block, sidecar emission |
+| `mcp-server/template.mjs` | Settings cog CSS/HTML/JS, whitespace line dimming/hiding, import packet collapsing |
+| `skills/review-pr/review-instructions.md` | Phase 2 + 3b guidance for import packets |
+
+## Verification
+
+1. **Whitespace detection:** Create a test diff with whitespace-only changes (re-indentation) mixed with real changes. Run through `review-tool.mjs`'s parser → verify `wsOnly: true` flags on the right lines. Open in browser → verify dimmed when toggle off, hidden when toggle on.
+2. **Import tagging:** Create a test diff with import additions/removals alongside logic changes. Run through `prepare-packets.sh` → verify sidecar JSON has `is_imports: true` on the right packets. Open in browser → verify collapsed by default, expandable on click.
+3. **Settings cog:** Open any review → verify cog icon appears in counter bar. Click → dropdown opens. Toggle switches work. Click outside → closes. Escape → closes. Both light and dark mode look correct.
+4. **End-to-end:** Run `/review-pr` on an actual PR with both whitespace and import changes. Verify the full flow.
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/rodrigooliveira/.REDACTED.jsonl
