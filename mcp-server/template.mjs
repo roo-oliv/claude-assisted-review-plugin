@@ -411,6 +411,73 @@ kbd {
   border: 1px solid var(--border); border-radius: 3px;
   background: var(--bg-secondary); color: var(--gutter-fg);
 }
+
+/* ===== Settings cog menu ===== */
+.settings-container { position: relative; }
+.settings-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border: none; border-radius: 4px;
+  background: transparent; color: var(--gutter-fg); cursor: pointer;
+  padding: 0;
+}
+.settings-btn:hover { background: var(--bg-tertiary); color: var(--fg); }
+.settings-dropdown {
+  display: none; position: absolute; right: 0; top: 100%;
+  margin-top: 4px; min-width: 260px; padding: 8px 0;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  z-index: 200;
+}
+.settings-dropdown.open { display: block; }
+.settings-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 14px; font-size: 0.85rem; color: var(--fg);
+}
+.settings-toggle {
+  position: relative; width: 34px; height: 18px; flex-shrink: 0;
+}
+.settings-toggle input {
+  opacity: 0; width: 0; height: 0; position: absolute;
+}
+.toggle-slider {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: var(--border); border-radius: 9px; cursor: pointer;
+  transition: background 0.2s;
+}
+.toggle-slider::before {
+  content: ""; position: absolute; width: 14px; height: 14px;
+  left: 2px; bottom: 2px; background: #fff;
+  border-radius: 50%; transition: transform 0.2s;
+}
+.settings-toggle input:checked + .toggle-slider {
+  background: var(--accent);
+}
+.settings-toggle input:checked + .toggle-slider::before {
+  transform: translateX(16px);
+}
+
+/* ===== Whitespace-only line dimming ===== */
+.line-ws-only .code, .line-ws-only .gutter { opacity: 0.35; }
+.ws-hidden .line-ws-only { display: none; }
+
+/* ===== Import packet collapsing ===== */
+.collapse-chevron {
+  display: inline-block; width: 0; height: 0;
+  border-top: 5px solid transparent; border-bottom: 5px solid transparent;
+  border-left: 6px solid var(--gutter-fg);
+  margin-right: 4px; transition: transform 0.15s;
+  vertical-align: middle; flex-shrink: 0;
+}
+.packet:not(.collapsed) .collapse-chevron {
+  transform: rotate(90deg);
+}
+.packet.collapsed .diff-table,
+.packet.collapsed .ai-summary,
+.packet.collapsed .diff-summary { display: none; }
+
+.badge-imports {
+  background: var(--badge-renamed);
+}
 </style>
 </head>
 <body>
@@ -442,6 +509,29 @@ kbd {
     <kbd>Esc</kbd> close &nbsp;
     <kbd>Ctrl+Enter</kbd> save
   </span>
+  <div class="settings-container">
+    <button class="settings-btn" id="settingsBtn" title="Settings">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M8 0a8.2 8.2 0 0 1 .701.031C9.444.095 9.99.645 10.16 1.29l.288 1.107c.018.066.079.158.212.224.231.114.454.243.668.386.123.082.233.09.3.071l1.102-.303c.644-.176 1.392.021 1.82.63.27.386.506.798.704 1.23.315.69.1 1.517-.356 1.988l-.814.806a.338.338 0 0 0-.048.27c.036.197.058.4.066.607a.34.34 0 0 0 .072.258l.812.81c.456.472.67 1.298.357 1.988a7.2 7.2 0 0 1-.704 1.228c-.428.61-1.176.807-1.82.63l-1.103-.303c-.066-.019-.176-.011-.299.071a5 5 0 0 1-.668.386.35.35 0 0 0-.212.224l-.288 1.107c-.17.646-.716 1.195-1.459 1.26a8.1 8.1 0 0 1-1.402 0c-.743-.065-1.289-.614-1.458-1.26l-.289-1.106a.35.35 0 0 0-.212-.225 5 5 0 0 1-.668-.386c-.123-.082-.233-.09-.3-.071l-1.1.303c-.644.176-1.392-.021-1.82-.63a7 7 0 0 1-.704-1.229c-.315-.689-.1-1.516.356-1.988l.814-.806a.34.34 0 0 0 .048-.27 5 5 0 0 1-.066-.608.34.34 0 0 0-.072-.257l-.812-.81c-.456-.472-.67-1.299-.357-1.989.198-.432.434-.844.704-1.229.428-.61 1.176-.807 1.82-.63l1.103.303c.066.019.176.011.299-.071.214-.143.437-.272.668-.386a.35.35 0 0 0 .212-.224l.289-1.106C6.01.645 6.556.095 7.299.03 7.53.01 7.764 0 8 0Zm-.571 1.525c-.036.003-.108.036-.137.146l-.289 1.105c-.147.561-.549.967-.998 1.189-.173.086-.34.183-.5.29-.417.278-.97.423-1.529.27l-1.103-.303c-.109-.03-.175.016-.195.046-.219.31-.41.641-.573.989-.014.031-.022.11.059.19l.815.806c.411.41.603.955.577 1.507a4 4 0 0 0 0 .503c.026.553-.166 1.099-.577 1.507l-.815.806c-.081.08-.073.159-.059.19.162.348.354.68.573.989.02.03.085.076.195.046l1.102-.303c.56-.153 1.113-.008 1.53.27.16.107.327.204.5.29.449.222.851.628.998 1.189l.289 1.105c.029.11.101.143.137.146a6.6 6.6 0 0 0 1.142 0c.036-.003.108-.036.137-.146l.289-1.105c.147-.561.549-.967.998-1.189.173-.086.34-.183.5-.29.417-.278.97-.423 1.529-.27l1.103.303c.109.03.175-.016.195-.046.219-.31.41-.641.573-.989.014-.031.022-.11-.059-.19l-.815-.806c-.411-.41-.603-.955-.577-1.507a4 4 0 0 0 0-.503c-.026-.553.166-1.099.577-1.507l.815-.806c.081-.08.073-.159.059-.19a6 6 0 0 0-.573-.989c-.02-.03-.085-.076-.195-.046l-1.102.303c-.56.153-1.113.008-1.53-.27a4 4 0 0 1-.5-.29c-.449-.222-.851-.628-.998-1.189l-.289-1.105c-.029-.11-.101-.143-.137-.146a6.6 6.6 0 0 0-1.142 0ZM11 8a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm-1.5 0a1.5 1.5 0 1 0-3.001.001A1.5 1.5 0 0 0 9.5 8Z"/>
+      </svg>
+    </button>
+    <div class="settings-dropdown" id="settingsDropdown">
+      <label class="settings-item">
+        <span>Hide whitespace changes</span>
+        <span class="settings-toggle">
+          <input type="checkbox" id="toggleWhitespace" checked>
+          <span class="toggle-slider"></span>
+        </span>
+      </label>
+      <label class="settings-item">
+        <span>Collapse imports</span>
+        <span class="settings-toggle">
+          <input type="checkbox" id="toggleImports" checked>
+          <span class="toggle-slider"></span>
+        </span>
+      </label>
+    </div>
+  </div>
   <a id="scrollToReview">Finish review &darr;</a>
 </div>
 
@@ -473,6 +563,8 @@ const state = {
 };
 let selection = null;
 let openFormRow = null;
+
+const settings = { hideWhitespace: true, collapseImports: true };
 
 // ===== Helpers =====
 function escHTML(s) {
@@ -525,19 +617,31 @@ function renderPackets() {
     el.id = 'packet-' + pktIdx;
     el.dataset.packetId = pkt.id;
 
+    if (pkt.is_imports) {
+      el.dataset.isImports = 'true';
+      if (settings.collapseImports) el.classList.add('collapsed');
+    }
+
     // Header
     const hdr = document.createElement('div');
     hdr.className = 'packet-header';
+    const isImport = pkt.is_imports;
     hdr.innerHTML =
+      (isImport ? '<span class="collapse-chevron"></span>' : '') +
       '<svg class="packet-file-icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M2 1.75C2 .784 2.784 0 3.75 0h6.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16h-9.5A1.75 1.75 0 0 1 2 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h9.5a.25.25 0 0 0 .25-.25V6h-2.75A1.75 1.75 0 0 1 9 4.25V1.5Zm6.75.062V4.25c0 .138.112.25.25.25h2.688l-.011-.013-2.914-2.914-.013-.011Z"/></svg>' +
       '<span class="packet-file">' + escHTML(pkt.file) + '</span>' +
       (pkt.part !== '1/1' ? ' <span class="packet-part">(' + escHTML(pkt.part) + ')</span>' : '') +
       ' <span class="badge ' + statusBadgeClass(pkt) + '">' + escHTML(statusLabel(pkt)) + '</span>' +
+      (isImport ? ' <span class="badge badge-imports">Imports</span>' : '') +
       (pkt.title ? ' <span class="packet-title">' + escHTML(pkt.title) + '</span>' : '') +
       '<span class="packet-stats">' +
         (pkt.additions > 0 ? '<span class="add">+' + pkt.additions + '</span> ' : '') +
         (pkt.deletions > 0 ? '<span class="del">-' + pkt.deletions + '</span>' : '') +
       '</span>';
+    if (isImport) {
+      hdr.style.cursor = 'pointer';
+      hdr.addEventListener('click', () => el.classList.toggle('collapsed'));
+    }
     el.appendChild(hdr);
 
     // Diff content
@@ -577,8 +681,9 @@ function renderPackets() {
 
         for (const line of hunk.lines) {
           const tr = document.createElement('tr');
-          const cls = line.type === 'add' ? 'line-add' : line.type === 'del' ? 'line-del' : '';
-          if (cls) tr.className = cls;
+          let cls = line.type === 'add' ? 'line-add' : line.type === 'del' ? 'line-del' : '';
+          if (line.wsOnly) cls += ' line-ws-only';
+          if (cls) tr.className = cls.trim();
 
           // Store line metadata for click handling
           tr.dataset.packetIdx = pktIdx;
@@ -1022,6 +1127,28 @@ document.getElementById('scrollToReview').addEventListener('click', (e) => {
   document.getElementById('reviewForm').scrollIntoView({ behavior: 'smooth' });
 });
 
+// ===== Settings cog =====
+document.getElementById('settingsBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  document.getElementById('settingsDropdown').classList.toggle('open');
+});
+document.addEventListener('click', (e) => {
+  const dd = document.getElementById('settingsDropdown');
+  if (dd.classList.contains('open') && !e.target.closest('.settings-container')) {
+    dd.classList.remove('open');
+  }
+});
+document.getElementById('toggleWhitespace').addEventListener('change', (e) => {
+  settings.hideWhitespace = e.target.checked;
+  document.getElementById('packets').classList.toggle('ws-hidden', settings.hideWhitespace);
+});
+document.getElementById('toggleImports').addEventListener('change', (e) => {
+  settings.collapseImports = e.target.checked;
+  document.querySelectorAll('.packet[data-is-imports="true"]').forEach(el => {
+    el.classList.toggle('collapsed', settings.collapseImports);
+  });
+});
+
 // ===== Keyboard shortcuts =====
 document.addEventListener('keydown', (e) => {
   const inInput = e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT';
@@ -1060,6 +1187,11 @@ document.addEventListener('keydown', (e) => {
 
   if (e.key === 'Escape') {
     e.preventDefault();
+    const dd = document.getElementById('settingsDropdown');
+    if (dd.classList.contains('open')) {
+      dd.classList.remove('open');
+      return;
+    }
     closeOpenForm();
   }
 });
@@ -1067,6 +1199,11 @@ document.addEventListener('keydown', (e) => {
 // ===== Init =====
 renderPackets();
 updateCounters();
+
+// Apply initial settings state
+if (settings.hideWhitespace) {
+  document.getElementById('packets').classList.add('ws-hidden');
+}
 
 // Measure header height and set sticky offsets dynamically
 (function setStickyOffsets() {

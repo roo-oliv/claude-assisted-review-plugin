@@ -5,12 +5,12 @@ import { handleReviewPackets } from "./review-tool.mjs";
 
 const server = new McpServer({
   name: "review-ui",
-  version: "2.0.0",
+  version: "4.0.0",
 });
 
 server.tool(
   "review_packets",
-  "Opens a browser-based review UI with GitHub-style inline commenting. Reads full diff data from a sidecar JSON file (written by prepare-packets.sh). Claude sends only lightweight metadata (ordering, AI summaries, titles). The reviewer adds line-level comments and selects a verdict (approve/comment/request_changes). Returns structured review with exact line positions.",
+  "Opens a browser-based review UI with GitHub-style inline commenting. Reads per-file diff data from a sidecar JSON file (written by prepare-packets.sh). Claude sends annotation-based packets with file_id + line ranges; the server slices diffs to extract per-packet hunks. The reviewer adds line-level comments and selects a verdict (approve/comment/request_changes). Returns structured review with exact line positions.",
   {
     pr_number: z.number(),
     pr_title: z.string(),
@@ -21,7 +21,11 @@ server.tool(
     data_file: z.string().describe("Path to JSON sidecar file from prepare-packets.sh"),
     packets: z.array(
       z.object({
-        id: z.number().describe("Packet ID — matches id in the JSON sidecar file"),
+        id: z.number().describe("Packet ID — sequential in presentation order"),
+        file_id: z.number().describe("File ID from the sidecar — references a file entry"),
+        start_line: z.number().describe("Start line of annotation (new-file line for RIGHT, old-file for LEFT)"),
+        end_line: z.number().describe("End line of annotation (inclusive)"),
+        side: z.string().optional().default("RIGHT").describe("Which side the line range refers to: RIGHT (new file, default) or LEFT (old file, for pure deletions)"),
         title: z.string().optional().describe("Short descriptive title for the packet"),
         file_status: z.string().optional().describe("added|modified|deleted|renamed"),
         language: z.string().optional().describe("Programming language (e.g. typescript, python)"),
@@ -37,7 +41,7 @@ server.tool(
           })
         ).optional().describe("Existing GitHub inline review comments mapped to this packet"),
       })
-    ).describe("Lightweight packet metadata in presentation order — no content field"),
+    ).describe("Annotation-based packets: each has file_id + line range. MCP server slices diffs from sidecar."),
     timeout_seconds: z.number().optional().default(1800),
   },
   async (params) => {

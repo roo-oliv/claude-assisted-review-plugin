@@ -1,6 +1,6 @@
-# Review Instructions — 4-Phase Packet Protocol
+# Review Instructions — 4-Phase Annotation Protocol
 
-This document governs your behavior during an AI-assisted code review session. Follow each phase sequentially. The review is an interactive, multi-turn conversation — you present pre-formatted packets and wait for user input at each step.
+This document governs your behavior during an AI-assisted code review session. Follow each phase sequentially. The review is an interactive, multi-turn conversation — you present changes and wait for user input at each step.
 
 ---
 
@@ -13,7 +13,7 @@ Present a summary before diving into any code. Use this exact format:
 
 Author:  {author}
 Branch:  {head} → {base}
-Changes: +{additions} -{deletions} across {changedFiles} files ({total_packets} review packets)
+Changes: +{additions} -{deletions} across {changedFiles} files
 ```
 
 **Description:**
@@ -28,22 +28,54 @@ List each commit as: `{sha[0:7]} {messageHeadline}`
 
 **Draft warning:** If the PR is a draft (`isDraft: true`), warn: "This PR is still a draft. The author may not be ready for a full review."
 
-Then ask: **"Ready to begin? I'll walk you through the changes in batches."**
+Then ask: **"Ready to begin? I'll walk you through the changes."**
 
 Wait for the user to confirm before proceeding.
 
 ---
 
-## Phase 2: Packet Ordering
+## Phase 2: Annotate & Order
 
-Read the `===PACKET_INDEX_START===` block and decide the order in which to present packets.
+Read the `===FILE_INDEX_START===` block to identify all files and their types. Then create annotation-based packets that the MCP server will use to slice diffs.
 
-### Ordering by Lines of Thought
+### Auto-Packets for Special Files
 
-The goal is to **tell a story**, not walk through files sequentially. A "line of thought" is a logical thread that spans multiple files — for example, a type definition, the function that uses it, and the test that covers it all form one line of thought.
+Special files (lock, binary, generated, minified) and rename-only files become auto-packets with standard titles — no annotation needed:
+- Lock file → title: "Update {basename} dependencies"
+- Binary file → title: "Update {filename}"
+- Generated file → title: "Regenerate {filename}"
+- Minified file → title: "Update minified {filename}"
+- Rename-only → title: "Rename {old} → {new}"
 
-1. **Read all commit messages and the PR description** to identify the distinct logical changes in the PR.
-2. **Group packets into lines of thought** — each group is a coherent concept or feature that the reviewer can understand as a unit. A line of thought might include packets from 3-4 different files.
+### Annotating Normal Files
+
+For each normal file, walk the diff (the `===FILE id=N===` block) and create **annotations**:
+
+1. Each annotation covers a **meaningful code unit** — a function, a group of related fields, a logical change, a test case, etc.
+2. Each annotation has:
+   - `file_id`: the file's ID from the index
+   - `start_line` / `end_line`: new-file line numbers from the `+` column (the right side of the diff). For **pure deletions** (lines only removed, nothing added), use old-file line numbers and set `side: "LEFT"`.
+   - `title`: a micro-commit message — what does this chunk do? Think: if this were its own commit, what would the message be?
+     - **Good:** "Add JWT expiry validation", "Define session timeout types", "Test token refresh on expiry"
+     - **Bad:** "handler.ts 2/3", "Update auth module", "Changes to types"
+   - `description`: 1-2 sentences explaining what the code does and why.
+
+3. **Sizing guidance** (not rigid): aim for 5-30 changed lines per annotation. A single line is fine if semantically distinct. A 50-line function is fine if it's cohesive. The question is: "can a reviewer hold this in their head as one concept?"
+
+4. **Import-heavy regions**: collapse into a single "Update imports" annotation.
+
+5. **Line number hints**: The `@@ -old,len +new,len @@` headers in the diff tell you the line numbers. Added lines (`+`) use the new-file numbering. Deleted lines (`-`) use the old-file numbering. Context lines (no prefix) have both.
+
+### Verify Completeness
+
+After creating all annotations, check that every `+` and `-` line in each file falls within at least one annotation. If gaps exist, either expand a neighboring annotation or create a new one. The MCP server has a safety net that catches missed lines, but it's better to be complete.
+
+### Order Narratively
+
+Order the annotations into **lines of thought** that cross file boundaries:
+
+1. **Read all commit messages and the PR description** to identify the distinct logical changes.
+2. **Group annotations into lines of thought** — each group is a coherent concept the reviewer can understand as a unit.
 3. **Order the lines of thought** using this general hierarchy as a starting framework (not a rigid rule):
    - Types, interfaces, schemas
    - Core implementation
@@ -51,41 +83,12 @@ The goal is to **tell a story**, not walk through files sequentially. A "line of
    - Tests
    - Configuration, CI/CD, documentation
    - Special files (lock, binary, generated, minified)
-4. **Within each line of thought**, order packets so each one builds on the previous: definition before usage, interface before implementation, setup before behavior.
-5. **Packets from the same file don't need to be consecutive.** If `handler.ts` has two hunks that belong to different logical threads, split them across lines of thought. Interleave freely when the narrative calls for it.
+4. **Within each line of thought**, order annotations so each builds on the previous: definition before usage, interface before implementation, setup before behavior.
+5. **Annotations from the same file don't need to be consecutive.** If `handler.ts` has two regions that belong to different logical threads, split them across lines of thought.
 
-### Packet Size Awareness
+### Assign Sequential Packet IDs
 
-Ideal packets are **under 10 changed lines**. Anything over 20 is a stretch — flag it in your summary so the reviewer knows a larger packet is coming.
-
-### Example: Sequential vs. Narrative
-
-**Bad — file-sequential ordering:**
-```
-1. src/types/auth.ts (1/2)    — JWT types
-2. src/types/auth.ts (2/2)    — Session types
-3. src/auth/jwt.ts (1/2)      — JWT validation
-4. src/auth/jwt.ts (2/2)      — JWT refresh
-5. src/auth/session.ts        — Session manager
-6. test/jwt.test.ts           — JWT tests
-7. test/session.test.ts       — Session tests
-```
-
-**Good — narrative ordering (lines of thought):**
-```
-Thread 1: JWT validation
-  1. src/types/auth.ts (1/2)  — JWT type definitions
-  2. src/auth/jwt.ts (1/2)    — JWT signature validation
-  3. test/jwt.test.ts          — Tests for JWT validation
-
-Thread 2: Session management
-  4. src/types/auth.ts (2/2)  — Session type definitions
-  5. src/auth/session.ts       — Session lifecycle
-  6. src/auth/jwt.ts (2/2)    — JWT refresh (ties sessions to tokens)
-  7. test/session.test.ts      — Tests for session management
-```
-
-Notice how `auth.ts` parts and `jwt.ts` parts are split across threads — each appears where it's most relevant, not grouped by file.
+Number the annotations sequentially (1, 2, 3, ...) in the narrative order you chose.
 
 ### Present the Plan
 
@@ -95,13 +98,16 @@ Show the reviewer the order you've chosen, grouped by lines of thought:
 I'll present {N} packets in this order:
 
 **{Thread 1 name}**
-  1. src/types/auth.ts (1/2, +8)
-  2. src/auth/jwt.ts (+12 -3)
-  3. test/jwt.test.ts (+15)
+  1. src/types/auth.ts:10-25 — "Add JWT expiry validation"
+  2. src/auth/jwt.ts:15-40 — "Validate signature with expiry check"
+  3. test/jwt.test.ts:1-30 — "Test JWT validation edge cases"
 
 **{Thread 2 name}**
-  4. src/types/auth.ts (2/2, +6)
+  4. src/types/auth.ts:30-45 — "Define session timeout types"
   ...
+
+**Special files**
+  8. package-lock.json — "Update dependencies"
 ```
 
 Proceed immediately to Phase 3 (no confirmation needed for the order).
@@ -114,24 +120,26 @@ Core of the protocol. All packets are presented in a browser-based GitHub-style 
 
 ### 3a. Extract Data File Path
 
-Find the `===REVIEW_DATA_FILE=...===` line in the prepare-packets.sh output. Extract the file path — this is the JSON sidecar file containing full packet data.
+Find the `===REVIEW_DATA_FILE=...===` line in the prepare-packets.sh output. Extract the file path — this is the JSON sidecar file containing per-file data.
 
 ### 3b. Prepare Lightweight Packet Metadata
 
-For each packet, in presentation order from Phase 2, prepare a lightweight metadata object:
+For each annotation, in presentation order from Phase 2, prepare a metadata object:
 
-- `id`: the packet ID (matches the JSON sidecar file)
-- `title`: a semantic name that describes *what this packet does*, not where it lives. Think of it as a micro-commit message — if this packet were its own commit, what would the message be?
-  - **Good titles:** "Add JWT signature validation", "Define session timeout types", "Test token refresh on expiry"
-  - **Bad titles:** "handler.ts 2/3", "Update auth module", "Changes to types"
-- `file_status`: map from packet type — `new` → `"added"`, `deleted` → `"deleted"`, `normal` → `"modified"`, `renamed` → `"renamed"`
+- `id`: the sequential packet ID assigned in Phase 2
+- `file_id`: the file's ID from the `===FILE_INDEX_START===` block
+- `start_line`: start of the annotation range (new-file line number, or old-file if `side: "LEFT"`)
+- `end_line`: end of the annotation range (inclusive)
+- `side`: `"RIGHT"` (default) for new-file line numbers, `"LEFT"` for pure deletions
+- `title`: the micro-commit message from the annotation
+- `file_status`: map from file status — `added` → `"added"`, `deleted` → `"deleted"`, `modified` → `"modified"`, `renamed` → `"renamed"`
 - `language`: infer from file extension (e.g., `.ts` → `"typescript"`, `.py` → `"python"`, `.go` → `"go"`)
-- `ai_summary`: 2-4 sentence analysis connecting this packet to the narrative. What it does, how it relates to what the reviewer just saw (previous packet) and what's coming next. For the first packet in a line of thought, set the stage. For the last, tie it together.
-- `existing_comments`: map the inline review comments from the pre-fetch data to this packet by matching the file path and line ranges within the packet's diff. Each comment should include: `id` (as string), `author`, `body`, `line`, `side`, `created_at`.
+- `ai_summary`: 2-4 sentence analysis connecting this packet to the narrative. What it does, how it relates to what the reviewer just saw and what's coming next. For the first packet in a line of thought, set the stage. For the last, tie it together. For import-heavy annotations, a single sentence is sufficient.
+- `existing_comments`: map the inline review comments from the pre-fetch data to this packet by matching the file path and line ranges. Each comment should include: `id` (as string), `author`, `body`, `line`, `side`, `created_at`.
 
-**IMPORTANT:** Do NOT include `content`, `file`, `part`, `type`, `additions`, or `deletions` in the packet metadata. These are already in the JSON sidecar file and the MCP server merges them automatically.
+**IMPORTANT:** Do NOT include `content`, `file`, `part`, `type`, `additions`, or `deletions` in the packet metadata. The MCP server derives these from the sidecar + line range.
 
-**Packet size note:** If a packet has 20+ changed lines, mention this in the `ai_summary` so the reviewer is prepared for a larger chunk.
+**For special files** (lock, binary, generated, minified, rename-only): use `start_line: 0`, `end_line: 0`, `side: "RIGHT"` — the server uses file-level metadata.
 
 ### 3c. Call the MCP Review Tool
 
@@ -149,6 +157,10 @@ Make a single `mcp__review-ui__review_packets` call:
   packets: [
     {
       id:                <packet_id>,
+      file_id:           <file_id>,
+      start_line:        <start>,
+      end_line:          <end>,
+      side:              "RIGHT",
       title:             "<short descriptive name>",
       file_status:       "added|modified|deleted|renamed",
       language:          "<language>",
@@ -198,11 +210,11 @@ Store the full response for Phase 4:
 
 If the MCP tool call fails (e.g., MCP server not installed or not running), fall back to the AskUserQuestion-based flow:
 
-- Batch packets in groups of 4
-- For each batch, use `AskUserQuestion` with one question per packet containing the verbatim diff content
-- Options per packet: "No comment" / "Discuss"
+- Batch the file diffs in groups of 4
+- For each batch, use `AskUserQuestion` with one question per file containing the verbatim diff content
+- Options per file: "No comment" / "Discuss"
 - Handle responses as before (No comment → skip, Discuss → follow up, Other typed text → store as comment)
-- After all packets: ask for verdict and overall body manually
+- After all files: ask for verdict and overall body manually
 
 ---
 
@@ -315,9 +327,9 @@ On failure, show the error and offer: Retry / Post without inline comments / Qui
 ## General Behavior Rules
 
 1. **Use the MCP tool first** — always try `mcp__review-ui__review_packets` before falling back to `AskUserQuestion`.
-2. **Don't copy diff content** — send only the `data_file` path and lightweight metadata. The MCP server reads full diffs from the JSON sidecar file.
+2. **Don't copy diff content** — send only the `data_file` path, `file_id`, and line ranges. The MCP server reads full diffs from the JSON sidecar file and slices them.
 3. **Stay neutral** — guide the review, don't judge the code. You may briefly flag potential issues, but the reviewer decides.
 4. **Never auto-advance** — always wait for tool responses before proceeding.
 5. **Handle errors gracefully** — if the MCP tool fails, fall back to AskUserQuestion. If `gh` commands fail, explain briefly and suggest a fix.
 6. **Answer questions briefly** — when asked, draw from the diff, commits, and PR description. Keep answers short and direct.
-7. **Narrative over sequence** — packets from the same file don't need to appear consecutively. Order by lines of thought that cross file boundaries, interleaving files when it serves the story.
+7. **Narrative over sequence** — annotations from the same file don't need to appear consecutively. Order by lines of thought that cross file boundaries, interleaving files when it serves the story.
